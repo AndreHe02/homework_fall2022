@@ -4,10 +4,13 @@ import time
 
 import gym
 import torch
+import pickle as pkl
 
 from cs285.infrastructure import pytorch_util as ptu
 from cs285.infrastructure.logger import Logger
 from cs285.infrastructure import utils
+
+from tqdm import tqdm 
 
 # how many rollouts to save as videos to tensorboard
 MAX_NVIDEO = 2
@@ -132,6 +135,10 @@ class RL_Trainer(object):
                 self.perform_logging(
                     itr, paths, eval_policy, train_video_paths, training_logs)
 
+                # print('\nBeginning logging procedure for expert policy...')
+                # self.perform_logging(
+                #     itr, paths, expert_policy, train_video_paths, training_logs)
+
                 if self.params['save_params']:
                     print('\nSaving agent params')
                     self.agent.save('{}/policy_itr_{}.pt'.format(self.params['logdir'], itr))
@@ -157,25 +164,30 @@ class RL_Trainer(object):
             train_video_paths: paths which also contain videos for visualization purposes
         """
 
-        # TODO decide whether to load training data or use the current policy to collect more data
+        # decide whether to load training data or use the current policy to collect more data
         # HINT: depending on if it's the first iteration or not, decide whether to either
                 # (1) load the data. In this case you can directly return as follows
                 # ``` return loaded_paths, 0, None ```
 
                 # (2) collect `self.params['batch_size']` transitions
-
-        # TODO collect `batch_size` samples to be used for training
+        if itr == 0:
+            with open(load_initial_expertdata, 'rb') as f:
+                loaded_paths = pkl.load(f)
+            return loaded_paths, 0, None         
+    
+        # collect `batch_size` samples to be used for training
         # HINT1: use sample_trajectories from utils
         # HINT2: you want each of these collected rollouts to be of length self.params['ep_len']
         print("\nCollecting data to be used for training...")
-        paths, envsteps_this_batch = TODO
+        batch_size = self.params['batch_size']
+        paths, envsteps_this_batch = utils.sample_trajectories(self.env, collect_policy, batch_size, self.params['ep_len'])
 
         # collect more rollouts with the same policy, to be saved as videos in tensorboard
         # note: here, we collect MAX_NVIDEO rollouts, each of length MAX_VIDEO_LEN
         train_video_paths = None
         if self.log_video:
             print('\nCollecting train rollouts to be used for saving videos...')
-            ## TODO look in utils and implement sample_n_trajectories
+            ## look in utils and implement sample_n_trajectories
             train_video_paths = utils.sample_n_trajectories(self.env, collect_policy, MAX_NVIDEO, MAX_VIDEO_LEN, True)
 
         return paths, envsteps_this_batch, train_video_paths
@@ -184,17 +196,18 @@ class RL_Trainer(object):
     def train_agent(self):
         print('\nTraining agent using sampled data from replay buffer...')
         all_logs = []
-        for train_step in range(self.params['num_agent_train_steps_per_iter']):
+        for train_step in tqdm(range(self.params['num_agent_train_steps_per_iter'])):
 
-            # TODO sample some data from the data buffer
+            # sample some data from the data buffer
             # HINT1: use the agent's sample function
             # HINT2: how much data = self.params['train_batch_size']
-            ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch = TODO
+            ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch \
+                = self.agent.replay_buffer.sample_random_data(self.params['train_batch_size'])
 
-            # TODO use the sampled data to train an agent
+            # use the sampled data to train an agent
             # HINT: use the agent's train function
             # HINT: keep the agent's training log for debugging
-            train_log = TODO
+            train_log = self.agent.train(ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch)
             all_logs.append(train_log)
         return all_logs
 
@@ -245,7 +258,8 @@ class RL_Trainer(object):
             logs["Eval_MaxReturn"] = np.max(eval_returns)
             logs["Eval_MinReturn"] = np.min(eval_returns)
             logs["Eval_AverageEpLen"] = np.mean(eval_ep_lens)
-
+            
+            
             logs["Train_AverageReturn"] = np.mean(train_returns)
             logs["Train_StdReturn"] = np.std(train_returns)
             logs["Train_MaxReturn"] = np.max(train_returns)

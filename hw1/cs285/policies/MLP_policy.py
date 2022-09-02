@@ -79,13 +79,29 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
             observation = obs
         else:
             observation = obs[None]
-
-        # TODO return the action that the policy prescribes
-        raise NotImplementedError
+        observation = ptu.from_numpy(observation.astype(np.float32))
+        # return the action that the policy prescribes
+        return ptu.to_numpy(self(observation).sample())
 
     # update/train this policy
     def update(self, observations, actions, **kwargs):
-        raise NotImplementedError
+
+        # for observation, action in zip(observations, actions):
+        #     observation = ptu.from_numpy(observation.astype(np.float32))
+        #     action = ptu.from_numpy(action.astype(np.float32))
+        #     action_distri = self(observation)
+        #     loss += - action_distri.log_prob(action)
+        # loss = loss / len(observations)
+
+        observations = ptu.from_numpy(observations.astype(np.float32))
+        actions = ptu.from_numpy(actions.astype(np.float32))
+        action_distributions = self(observations)
+        loss = - (action_distributions.log_prob(actions)).mean()
+        
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss 
 
     # This function defines the forward pass of the network.
     # You can return anything you want, but you should be able to differentiate
@@ -93,7 +109,17 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     # return more flexible objects, such as a
     # `torch.distributions.Distribution` object. It's up to you!
     def forward(self, observation: torch.FloatTensor) -> Any:
-        raise NotImplementedError
+        if self.discrete:
+            raise NotImplementedError()
+            # action = self.logits_na(observation)
+            # # maximizing log prob should be equivalent to MSE
+            # return distributions.Normal(action, torch.ones_like(action))
+        else:
+            action_mean = self.mean_net(observation)
+            return distributions.MultivariateNormal(
+                    action_mean, 
+                    covariance_matrix=torch.diag(torch.exp(self.logstd))
+                )        
 
 
 #####################################################
@@ -102,14 +128,14 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
 class MLPPolicySL(MLPPolicy):
     def __init__(self, ac_dim, ob_dim, n_layers, size, **kwargs):
         super().__init__(ac_dim, ob_dim, n_layers, size, **kwargs)
-        self.loss = nn.MSELoss()
+        # self.loss = nn.MSELoss()
 
     def update(
             self, observations, actions,
             adv_n=None, acs_labels_na=None, qvals=None
     ):
         # TODO: update the policy and return the loss
-        loss = TODO
+        loss = MLPPolicy.update(self, observations, actions)
         return {
             # You can add extra logging information here, but keep this line
             'Training Loss': ptu.to_numpy(loss),
